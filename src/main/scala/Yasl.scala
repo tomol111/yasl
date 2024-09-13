@@ -8,104 +8,164 @@ import util.matching.Regex
 // ===========
 
 
-def eval(expr: Expr): Double = expr match
+def exec(ast: AST, env: Environment): Unit = ast match
+  case Chunk(stmts) =>
+    stmts.foreach(exec(_, env))
+  case LetStmt(Name(target), expr) =>
+    env(target) = eval(expr, env)
+  case expr: Expr =>
+    eval(expr, env)
+
+
+def eval(expr: Expr, env: Environment): YaslValue = expr match
   case Const(value) => value
 
-  case UnaryOp(operator, operand) => operator match
-    case Plus => eval(operand)
-    case Minus => -eval(operand)
+  case Name(variable) => env(variable)
 
-  case BinOp(left, op, right) => op match
-    case Plus => eval(left) + eval(right)
-    case Minus => eval(left) - eval(right)
-    case Star => eval(left) * eval(right)
-    case Slash => eval(left) / eval(right)
-    case Caret => math.pow(eval(left), eval(right))
+  case Unary(operator, operand) => operator match
+    case Plus => eval(operand, env)
+    case Minus => -eval(operand, env)
+
+  case Binary(left, op, right) => op match
+    case Plus => eval(left, env) + eval(right, env)
+    case Minus => eval(left, env) - eval(right, env)
+    case Star => eval(left, env) * eval(right, env)
+    case Slash => eval(left, env) / eval(right, env)
+    case Caret => math.pow(eval(left, env), eval(right, env))
+
+
+type Environment = collection.mutable.Map[String, YaslValue]
+object Environment:
+  def apply(items: (String, YaslValue)*): Environment =
+    collection.mutable.Map[String, YaslValue](items*)
+
+type YaslValue = Double
 
 
 // Parser
 // ======
 
 /*
+ * chunk        ::= statements*
+ *
+ * statement    ::= "let" IDENTIFIER "=" expression ";"
+ *                | expression ";"
+ *
  * expression   ::= term
  * term         ::= ("+"|"-")? factor | term ("+"|"-") factor
  * factor       ::= power | factor ("*"|"/") power
  * power        ::= primary ("^" power)?
- * primary      ::= "(" expression ")" | NUMBER
+ * primary      ::= IDENTIFIER | NUMBER | "(" expression ")"
  */
 
 // comparison   ::= term ((">"|">="|"<"|"<="|"!="|"==") term)*
 
-def parse(tokens: List[Token]): AST =
-  val (expr, rest) = expression(tokens)
-  assert(rest.isEmpty)
-  expr
 
-def expression(tokens: List[Token]): (Expr, List[Token]) =
-  term(tokens)
+def parseChunk(tokens: List[Token]): Chunk =
+  val stmts = collection.mutable.ListBuffer.empty[Stmt]
+  def go(tokens: List[Token]): Unit =
+    if tokens.nonEmpty then
+      val (stmt, rest) = parseStatement(tokens)
+      stmts += stmt
+      go(rest)
+  go(tokens)
+  Chunk(stmts.toList)
+
+
+def parseStatement(tokens: List[Token]): (Stmt, List[Token]) = tokens match
+  case Token(Let, _, _) :: Token(Identifier, target, _) :: Token(Equal, _, _) :: tailWithValue =>
+    val (expr, tailWithColon) = parseExpression(tailWithValue)
+    tailWithColon match
+      case Token(Colon, _, _) :: rest =>
+        (LetStmt(Name(target), expr), rest)
+      case _ => ???
+  case tokens =>
+    val (expr, rest) = parseExpression(tokens)
+    rest match
+      case Token(Colon, _, _) :: rest => (expr, rest)
+      case _ => ???
+
+
+def parseExpression(tokens: List[Token]): (Expr, List[Token]) =
+  parseTerm(tokens)
+
 
 type TermOp = Plus.type | Minus.type
 
-def term(tokens: List[Token]): (Expr, List[Token]) =
+def parseTerm(tokens: List[Token]): (Expr, List[Token]) =
   val (expr, rest) = tokens match
     case Token(op: TermOp, _, _) :: tailWithOperand =>
-      val (operand, tail) = factor(tailWithOperand)
-      (UnaryOp(op, operand), tail)
+      val (operand, tail) = parseFactor(tailWithOperand)
+      (Unary(op, operand), tail)
     case tailWithOperand =>
-      factor(tailWithOperand)
-  _term(expr, rest)
+      parseFactor(tailWithOperand)
+  _parseTerm(expr, rest)
 
-def _term(left: Expr, tokens: List[Token]): (Expr, List[Token]) =
+def _parseTerm(left: Expr, tokens: List[Token]): (Expr, List[Token]) =
   tokens match
     case Token(op: TermOp, _, _) :: tailWithOperand =>
-      val (right, rest) = factor(tailWithOperand)
-      _term(BinOp(left, op, right), rest)
+      val (right, rest) = parseFactor(tailWithOperand)
+      _parseTerm(Binary(left, op, right), rest)
     case rest =>
       (left, rest)
+
 
 type FactorOp = Star.type | Slash.type
 
-def factor(tokens: List[Token]): (Expr, List[Token]) =
-  val (leftOperand, tail) = power(tokens)
-  _factor(leftOperand, tail)
+def parseFactor(tokens: List[Token]): (Expr, List[Token]) =
+  val (leftOperand, tail) = parsePower(tokens)
+  _parseFactor(leftOperand, tail)
 
-def _factor(left: Expr, tokens: List[Token]): (Expr, List[Token]) =
+def _parseFactor(left: Expr, tokens: List[Token]): (Expr, List[Token]) =
   tokens match
     case Token(op: FactorOp, _, _) :: tailWithOperand =>
-      val (right, rest) = power(tailWithOperand)
-      _factor(BinOp(left, op, right), rest)
+      val (right, rest) = parsePower(tailWithOperand)
+      _parseFactor(Binary(left, op, right), rest)
     case rest =>
       (left, rest)
 
-def power(tokens: List[Token]): (Expr, List[Token]) =
-  val (base, tail) = primary(tokens)
+
+def parsePower(tokens: List[Token]): (Expr, List[Token]) =
+  val (base, tail) = parsePrimary(tokens)
   tail match
     case Token(Caret, _, _) :: tailWithExponent =>
-      val (exp, rest) = power(tailWithExponent)
-      (BinOp(base, Caret, exp), rest)
+      val (exp, rest) = parsePower(tailWithExponent)
+      (Binary(base, Caret, exp), rest)
     case rest =>
       (base, rest)
 
-def primary(tokens: List[Token]): (Expr, List[Token]) =
+
+def parsePrimary(tokens: List[Token]): (Expr, List[Token]) =
   tokens match
+    case Token(Identifier, lexeme, _) :: rest =>
+      (Name(lexeme), rest)
+    case Token(Num, lexeme, _) :: rest =>
+      (Const(lexeme.toDouble), rest)
     case Token(LParen, _, _) :: tailWithExpresion =>
-      val (expr, tailWithCloseParen) = expression(tailWithExpresion)
+      val (expr, tailWithCloseParen) = parseExpression(tailWithExpresion)
       tailWithCloseParen match
         case Token(RParen, _, _) :: rest =>
           (expr, rest)
         case _ => ???
-    case Token(Num, lexeme, _) :: rest =>
-      (Const(lexeme.toDouble), rest)
     case _ => ???
+
+
+// AST
+// ===
 
 
 sealed trait AST
 
-sealed trait Expr extends AST
+case class Chunk(stmts: List[Stmt]) extends AST
 
-case class BinOp(left: Expr, op: InfixOp, right: Expr) extends Expr
-case class UnaryOp(op: PrefixOp, operand: Expr) extends Expr
-case class Const(value: Double) extends Expr
+sealed trait Stmt extends AST
+case class LetStmt(target: Name, value: Expr) extends Stmt
+
+sealed trait Expr extends Stmt
+case class Binary(left: Expr, op: InfixOp, right: Expr) extends Expr
+case class Unary(op: PrefixOp, operand: Expr) extends Expr
+case class Const(value: YaslValue) extends Expr
+case class Name(value: String) extends Expr
 
 type InfixOp = Plus.type | Minus.type | Star.type | Slash.type | Caret.type
 type PrefixOp = Plus.type | Minus.type
@@ -120,13 +180,14 @@ sealed trait LexemeType
 export TokenType.*
 enum TokenType extends LexemeType:
   case Num
-  case Name
+  case Identifier
 
   case Plus, Minus, Star, Slash, Caret
   case LParen, RParen
-  case Assign
+  case Equal
+  case Colon
 
-  case Val
+  case Let
 
 export WhiteLexeme.*
 enum WhiteLexeme extends LexemeType:
@@ -135,7 +196,7 @@ enum WhiteLexeme extends LexemeType:
 
 
 val keywords = Map[String, TokenType](
-  "val" -> Val,
+  "let" -> Let,
 )
 
 
@@ -143,7 +204,7 @@ val lexemePatterns = List[(Regex, LexemeType)](
   "\\s+".r -> WhiteSpace,
   "#.*".r -> Comment,
   raw"\d+(\.\d+)?".r -> Num,
-  raw"[\w&&[^\d]]\w*".r -> Name,
+  raw"[\w&&[^\d]]\w*".r -> Identifier,
   "\\+".r -> Plus,
   "-".r -> Minus,
   "\\*".r -> Star,
@@ -151,7 +212,8 @@ val lexemePatterns = List[(Regex, LexemeType)](
   "\\^".r -> Caret,
   "\\(".r -> LParen,
   "\\)".r -> RParen,
-  "=".r -> Assign,
+  "=".r -> Equal,
+  ";".r -> Colon,
 )
 
 

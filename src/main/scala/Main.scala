@@ -13,27 +13,33 @@ import util.boundary, boundary.break
       println("Usage: jasl [script]")
       sys.exit(64)
 
+
 def runPrompt(): Unit =
-  print("yasl> ")
-  io.StdIn.readLine() match
-    case null =>
-      println()
-    case text =>
-      run(text, "<REPR>")
-      runPrompt()
+  println("YASL")
+  val env = Environment()
+  def step(): Unit =
+    print("> ")
+    io.StdIn.readLine() match
+      case null =>  // EOF
+        println()  // add missing '\n'
+      case input =>
+        scanTokens(input, "<REPL>")
+          .left.map(println(_)).toOption
+          .map(parseChunk)
+          //.map(dumpAST(_))
+          .map(exec(_, env))
+        step()
+  step()
 
 
 def runFile(fileName: String): Unit =
   val filePath = os.Path(os.FilePath(fileName), os.pwd)
   val fileText = os.read(filePath)
-  run(fileText, filePath.toString)
-
-
-def run(code: String, name: String) =
-  scanTokens(code, name)
+  val env = Environment()
+  scanTokens(fileText, fileName)
     .left.map(println(_)).toOption
-    .map(parse)
-    .map(dumpAST(_))
+    .map(parseChunk)
+    .map(exec(_, env))
 
 
 def dumpTokens(tokens: Iterable[Token]): Unit =
@@ -50,8 +56,11 @@ def dumpAST(tree: AST, depth: Int = 0): Unit =
     case Const(const) =>
       println(s"Const $const")
 
-    case BinOp(left, op, right) =>
-      println("BinOp")
+    case Name(name) =>
+      println(s"Name $name")
+
+    case Binary(left, op, right) =>
+      println("Binary")
 
       print(s"${deeperIndent}left: ")
       dumpAST(left, deeper)
@@ -61,10 +70,26 @@ def dumpAST(tree: AST, depth: Int = 0): Unit =
       print(s"${deeperIndent}right: ")
       dumpAST(right, deeper)
 
-    case UnaryOp(op, operand) =>
-      println("UnaryOP")
+    case Unary(op, operand) =>
+      println("Unary")
 
       println(s"${deeperIndent}op: $op")
 
       print(s"${deeperIndent}operand: ")
       dumpAST(operand, deeper)
+
+    case LetStmt(target, value) =>
+      println("LetStmt")
+
+      print(s"${deeperIndent}target: ")
+      dumpAST(target, deeper)
+
+      print(s"${deeperIndent}value: ")
+      dumpAST(value, deeper)
+
+    case Chunk(stmts) =>
+      println("Chunk")
+
+      for (stmt, i) <- stmts.zipWithIndex do
+        print(s"${deeperIndent}$i: ")
+        dumpAST(stmt, deeper)
