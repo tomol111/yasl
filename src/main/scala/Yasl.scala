@@ -2,6 +2,7 @@ package yasl
 
 import util.boundary, boundary.break
 import util.matching.Regex
+import util.{Try, Success, Failure}
 
 
 // Interpreter
@@ -9,8 +10,6 @@ import util.matching.Regex
 
 
 def exec(ast: AST, env: Environment): Unit = ast match
-  case Chunk(stmts) =>
-    stmts.foreach(exec(_, env))
   case LetStmt(Name(target), expr) =>
     env(target) = eval(expr, env)
   case expr: Expr =>
@@ -22,16 +21,24 @@ def eval(expr: Expr, env: Environment): YaslValue = expr match
 
   case Name(variable) => env(variable)
 
-  case Unary(operator, operand) => operator match
-    case Plus => eval(operand, env)
-    case Minus => -eval(operand, env)
+  case Unary(op, operand) => eval(operand, env) match
+    case value: Double => op match
+      case Plus => value
+      case Minus => -value
+    case YaslNil => ???
 
-  case Binary(left, op, right) => op match
-    case Plus => eval(left, env) + eval(right, env)
-    case Minus => eval(left, env) - eval(right, env)
-    case Star => eval(left, env) * eval(right, env)
-    case Slash => eval(left, env) / eval(right, env)
-    case Caret => math.pow(eval(left, env), eval(right, env))
+  case Binary(left, op, right) => (eval(left, env), eval(right, env)) match
+    case (leftVal: Double, rightVal: Double) => op match
+      case Plus => leftVal + rightVal
+      case Minus => leftVal - rightVal
+      case Star => leftVal * rightVal
+      case Slash => leftVal / rightVal
+      case Caret => math.pow(leftVal, rightVal)
+    case (YaslNil, _) | (_, YaslNil) => ???
+
+  case Block(stmts, expr) =>
+    stmts.foreach(exec(_, env))
+    expr.map(eval(_, env)).getOrElse(YaslNil)
 
 
 type Environment = collection.mutable.Map[String, YaslValue]
@@ -39,14 +46,17 @@ object Environment:
   def apply(items: (String, YaslValue)*): Environment =
     collection.mutable.Map[String, YaslValue](items*)
 
-type YaslValue = Double
+
+type YaslValue = Double | YaslNil.type
+
+object YaslNil
 
 
 // Parser
 // ======
 
 /*
- * chunk        ::= statements*
+ * block        ::= statement* expression?
  *
  * statement    ::= "let" IDENTIFIER "=" expression ";"
  *                | expression ";"
@@ -61,7 +71,31 @@ type YaslValue = Double
 // comparison   ::= term ((">"|">="|"<"|"<="|"!="|"==") term)*
 
 
-def parseChunk(tokens: List[Token]): Chunk =
+def parse(tokens: List[Token]): Block =
+  val (ast, rest) = parseBlock(tokens)
+  assert(rest == Nil)
+  ast
+
+
+def parseBlock(tokens: List[Token]): (Block, List[Token]) =
+  val stmts = collection.mutable.ListBuffer.empty[Stmt]
+  var expr: Option[Expr] = None
+  def go(tokens: List[Token]): List[Token] =
+    Try(parseStatement(tokens)) match
+      case Success(stmt, rest) =>
+        stmts += stmt
+        go(rest)
+      case Failure(_) =>
+        Try(parseExpression(tokens)) match
+          case Success(expr_, rest) =>
+            expr = Some(expr_)
+            rest
+          case Failure(_) =>
+            tokens
+  val rest = go(tokens)
+  (Block(stmts.toList, expr), rest)
+
+def _parseBlock(tokens: List[Token]): Block =
   val stmts = collection.mutable.ListBuffer.empty[Stmt]
   def go(tokens: List[Token]): Unit =
     if tokens.nonEmpty then
@@ -69,7 +103,7 @@ def parseChunk(tokens: List[Token]): Chunk =
       stmts += stmt
       go(rest)
   go(tokens)
-  Chunk(stmts.toList)
+  Block(stmts.toList)
 
 
 def parseStatement(tokens: List[Token]): (Stmt, List[Token]) = tokens match
@@ -156,12 +190,11 @@ def parsePrimary(tokens: List[Token]): (Expr, List[Token]) =
 
 sealed trait AST
 
-case class Chunk(stmts: List[Stmt]) extends AST
-
 sealed trait Stmt extends AST
 case class LetStmt(target: Name, value: Expr) extends Stmt
 
 sealed trait Expr extends Stmt
+case class Block(stmts: List[Stmt], expr: Option[Expr] = None) extends Expr
 case class Binary(left: Expr, op: InfixOp, right: Expr) extends Expr
 case class Unary(op: PrefixOp, operand: Expr) extends Expr
 case class Const(value: YaslValue) extends Expr

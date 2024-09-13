@@ -25,9 +25,12 @@ def runPrompt(): Unit =
       case input =>
         scanTokens(input, "<REPL>")
           .left.map(println(_)).toOption
-          .map(parseChunk)
+          .map(parse)
           //.map(dumpAST(_))
-          .map(exec(_, env))
+          .map(eval(_, env))
+          .foreach:
+            case YaslNil => ()
+            case value => println(value)
         step()
   step()
 
@@ -38,7 +41,7 @@ def runFile(fileName: String): Unit =
   val env = Environment()
   scanTokens(fileText, fileName)
     .left.map(println(_)).toOption
-    .map(parseChunk)
+    .map(parse)
     .map(exec(_, env))
 
 
@@ -87,9 +90,12 @@ def dumpAST(tree: AST, depth: Int = 0): Unit =
       print(s"${deeperIndent}value: ")
       dumpAST(value, deeper)
 
-    case Chunk(stmts) =>
-      println("Chunk")
+    case Block(stmts, expr) =>
+      println("Block")
 
       for (stmt, i) <- stmts.zipWithIndex do
         print(s"${deeperIndent}$i: ")
         dumpAST(stmt, deeper)
+
+      print(s"${deeperIndent}expr: ")
+      expr.foreach(dumpAST(_, deeper))

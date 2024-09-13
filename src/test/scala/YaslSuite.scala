@@ -173,38 +173,64 @@ class ParserSpec extends AnyFlatSpec:
     assert(rest == Nil)
 
 
-  behavior of "Parser - parsing chunk"
+  behavior of "Parser - parsing block"
 
-  it should "parse chunk" in:
-    val chunk = parseChunk(scanTokens("let x = 10; let y = x * 3;").toOption.get)
+  it should "parse block" in:
+    val (block, rest) = parseBlock(scanTokens("let x = 10; let y = x * 3;").toOption.get)
     assert:
-      chunk == Chunk:
+      block == Block:
         List(
           LetStmt(Name("x"), Const(10)),
           LetStmt(Name("y"), Binary(Name("x"), Star, Const(3))),
         )
+    assert(rest == Nil)
+
+  it should "parse block ending with expression" in:
+    val (block, rest) = parseBlock(scanTokens("let x = 10; x * 3").toOption.get)
+    assert:
+      block == Block(
+        List(LetStmt(Name("x"), Const(10))),
+        Some(Binary(Name("x"), Star, Const(3))),
+      )
+    assert(rest == Nil)
 
 
 class InterpreterSuite extends AnyFlatSpec:
   behavior of "Interpreter - evaluate"
 
   it should "eval constant" in:
-    assert(eval(Const(10), Environment()) == 10)
+    assert(eval(Const(10), Environment()) == 10.0)
 
   it should "eval unary operation" in:
-    assert(eval(Unary(Plus, Const(12)), Environment()) == 12)
-    assert(eval(Unary(Minus, Const(10)), Environment()) == -10)
+    assert(eval(Unary(Plus, Const(12)), Environment()) == 12.0)
+    assert(eval(Unary(Minus, Const(10)), Environment()) == -10.0)
 
   it should "eval binary operation" in:
-    assert(eval(Binary(Const(3), Plus, Const(12)), Environment()) == 15)
-    assert(eval(Binary(Const(4), Minus, Const(1)), Environment()) == 3)
-    assert(eval(Binary(Const(3), Star, Const(10)), Environment()) == 30)
-    assert(eval(Binary(Const(20), Slash, Const(5)), Environment()) == 4)
-    assert(eval(Binary(Const(2), Caret, Const(3)), Environment()) == 8)
+    assert(eval(Binary(Const(3), Plus, Const(12)), Environment()) == 15.0)
+    assert(eval(Binary(Const(4), Minus, Const(1)), Environment()) == 3.0)
+    assert(eval(Binary(Const(3), Star, Const(10)), Environment()) == 30.0)
+    assert(eval(Binary(Const(20), Slash, Const(5)), Environment()) == 4.0)
+    assert(eval(Binary(Const(2), Caret, Const(3)), Environment()) == 8.0)
 
   it should "evaluate variable to bounded value" in:
-    val env = collection.mutable.Map[String, YaslValue]("x" -> 14)
-    assert(eval(Unary(Minus, Name("x")), env) == -14)
+    val env = Environment("x" -> 14)
+    assert(eval(Unary(Minus, Name("x")), env) == -14.0)
+
+  it should "evaluate block with tail expression" in:
+    val env = Environment()
+    val block = Block(
+      List(LetStmt(Name("x"), Const(10))),
+      Some(Name("x")),
+    )
+    assert(eval(block, env) == 10.0)
+
+  it should "evaluate block without tail expression" in:
+    val env = Environment()
+    val block = Block:
+      List(
+        LetStmt(Name("x"), Const(10)), LetStmt(Name("y"), Binary(Name("x"), Plus, Const(5)))
+      )
+    assert(eval(block, env) == YaslNil)
 
 
   behavior of "Interpreter - execute"
@@ -219,7 +245,7 @@ class InterpreterSuite extends AnyFlatSpec:
     exec(LetStmt(Name("bar"), Binary(Name("foo"), Plus, Const(3))), env)
     assert(env.get("bar") == Some(8))
 
-  it should "execute statement expresion" in:
+  it should "execute statement expression" in:
     val env = Environment("foo" -> 5)
     exec(Binary(Const(9), Plus, Name("foo")), env)
     assert(env.toList == List("foo" -> 5))
