@@ -34,7 +34,13 @@ def eval(expr: Expr, env: Environment): YaslValue = expr match
       case Star => leftVal * rightVal
       case Slash => leftVal / rightVal
       case Caret => math.pow(leftVal, rightVal)
-    case (YaslNil, _) | (_, YaslNil) => ???
+      case EqEqual => leftVal == rightVal
+      case NotEqual => leftVal != rightVal
+      case Less => leftVal < rightVal
+      case Greater => leftVal > rightVal
+      case LessEqual => leftVal <= rightVal
+      case GreaterEqual => leftVal >= rightVal
+    case (_, _) => ???
 
   case Block(stmts, expr) =>
     stmts.foreach(exec(_, env))
@@ -47,7 +53,7 @@ object Environment:
     collection.mutable.Map[String, YaslValue](items*)
 
 
-type YaslValue = Double | YaslNil.type
+type YaslValue = Double | Boolean | YaslNil.type
 
 object YaslNil
 
@@ -61,14 +67,13 @@ object YaslNil
  * statement    ::= "let" IDENTIFIER "=" expression ";"
  *                | expression ";"
  *
- * expression   ::= term
+ * expression   ::= comparison
+ * comparison   ::= term ((">"|">="|"<"|"<="|"!="|"==") term)?
  * term         ::= ("+"|"-")? factor | term ("+"|"-") factor
  * factor       ::= power | factor ("*"|"/") power
  * power        ::= primary ("^" power)?
  * primary      ::= IDENTIFIER | NUMBER | "(" expression ")"
  */
-
-// comparison   ::= term ((">"|">="|"<"|"<="|"!="|"==") term)*
 
 
 def parse(tokens: List[Token]): Block =
@@ -121,7 +126,19 @@ def parseStatement(tokens: List[Token]): (Stmt, List[Token]) = tokens match
 
 
 def parseExpression(tokens: List[Token]): (Expr, List[Token]) =
-  parseTerm(tokens)
+  parseComparison(tokens)
+
+
+type ComparisonOp = EqEqual.type | NotEqual.type | Less.type | Greater.type | LessEqual.type | GreaterEqual.type
+
+def parseComparison(tokens: List[Token]): (Expr, List[Token]) =
+  val (left, tail) = parseTerm(tokens)
+  tail match
+    case Token(op: ComparisonOp, _, _) :: tailWithRightTerm =>
+      val (right, rest) = parseTerm(tailWithRightTerm)
+      (Binary(left, op, right), rest)
+    case _ =>
+      (left, tail)
 
 
 type TermOp = Plus.type | Minus.type
@@ -200,8 +217,8 @@ case class Unary(op: PrefixOp, operand: Expr) extends Expr
 case class Const(value: YaslValue) extends Expr
 case class Name(value: String) extends Expr
 
-type InfixOp = Plus.type | Minus.type | Star.type | Slash.type | Caret.type
-type PrefixOp = Plus.type | Minus.type
+type InfixOp = TermOp | FactorOp | Caret.type | ComparisonOp
+type PrefixOp = TermOp
 
 
 // Lexer
@@ -216,6 +233,7 @@ enum TokenType extends LexemeType:
   case Identifier
 
   case Plus, Minus, Star, Slash, Caret
+  case EqEqual, NotEqual, Less, Greater, LessEqual, GreaterEqual
   case LParen, RParen
   case Equal
   case Colon
@@ -245,8 +263,14 @@ val lexemePatterns = List[(Regex, LexemeType)](
   "\\^".r -> Caret,
   "\\(".r -> LParen,
   "\\)".r -> RParen,
-  "=".r -> Equal,
   ";".r -> Colon,
+  "==".r -> EqEqual,
+  "!=".r -> NotEqual,
+  "<=".r -> LessEqual,
+  ">=".r -> GreaterEqual,
+  "<".r -> Less,
+  ">".r -> Greater,
+  "=".r -> Equal,
 )
 
 

@@ -97,5 +97,7 @@ def dumpAST(tree: AST, depth: Int = 0): Unit =
         print(s"${deeperIndent}$i: ")
         dumpAST(stmt, deeper)
 
-      print(s"${deeperIndent}expr: ")
-      expr.foreach(dumpAST(_, deeper))
+      expr.foreach { exp =>
+        print(s"${deeperIndent}expr: ")
+        dumpAST(exp, deeper)
+      }

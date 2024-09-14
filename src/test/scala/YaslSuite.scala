@@ -9,8 +9,8 @@ def disassembleToken(token: Token): (TokenType, String) = (token.typ, token.lexe
 class LexerSpec extends AnyFlatSpec:
   behavior of "Lexer"
 
-  it should "parse one character operators" in:
-    val result = scanTokens("+-*/^()=;").toOption.get.map(disassembleToken)
+  it should "parse operators" in:
+    val result = scanTokens("+ - * / ^ ( ) = ; == != < > <= >=").toOption.get.map(disassembleToken)
     val expected = List(
       Plus -> "+",
       Minus -> "-",
@@ -21,6 +21,12 @@ class LexerSpec extends AnyFlatSpec:
       RParen -> ")",
       Equal -> "=",
       Colon -> ";",
+      EqEqual -> "==",
+      NotEqual -> "!=",
+      Less -> "<",
+      Greater -> ">",
+      LessEqual -> "<=",
+      GreaterEqual -> ">=",
     )
     assert(result == expected)
 
@@ -149,6 +155,18 @@ class ParserSpec extends AnyFlatSpec:
     )
     assert(rest == Nil)
 
+  it should "parse comparison" in:
+    val (expr, rest) = parseExpression(scanTokens("4 + 2 != -10").toOption.get)
+    assert(
+      expr ==
+      Binary(
+        Binary(Const(4), Plus, Const(2)),
+        NotEqual,
+        Unary(Minus, Const(10))
+      )
+    )
+    assert(rest == Nil)
+
   it should "parse parenthesized expression" in:
     val (expr, rest) = parseExpression(scanTokens("12 - (10 - 3)").toOption.get)
     assert(expr == Binary(Const(12), Minus, Binary(Const(10), Minus, Const(3))))
@@ -211,6 +229,18 @@ class InterpreterSuite extends AnyFlatSpec:
     assert(eval(Binary(Const(3), Star, Const(10)), Environment()) == 30.0)
     assert(eval(Binary(Const(20), Slash, Const(5)), Environment()) == 4.0)
     assert(eval(Binary(Const(2), Caret, Const(3)), Environment()) == 8.0)
+    assert(eval(Binary(Const(2), EqEqual, Const(2)), Environment()) == true)
+    assert(eval(Binary(Const(2), EqEqual, Const(3)), Environment()) == false)
+    assert(eval(Binary(Const(2), NotEqual, Const(2)), Environment()) == false)
+    assert(eval(Binary(Const(2), NotEqual, Const(3)), Environment()) == true)
+    assert(eval(Binary(Const(2), Less, Const(9)), Environment()) == true)
+    assert(eval(Binary(Const(9), Less, Const(9)), Environment()) == false)
+    assert(eval(Binary(Const(9), Greater, Const(2)), Environment()) == true)
+    assert(eval(Binary(Const(9), Greater, Const(9)), Environment()) == false)
+    assert(eval(Binary(Const(2), LessEqual, Const(2)), Environment()) == true)
+    assert(eval(Binary(Const(9), LessEqual, Const(2)), Environment()) == false)
+    assert(eval(Binary(Const(2), GreaterEqual, Const(2)), Environment()) == true)
+    assert(eval(Binary(Const(2), GreaterEqual, Const(9)), Environment()) == false)
 
   it should "evaluate variable to bounded value" in:
     val env = Environment("x" -> 14)
