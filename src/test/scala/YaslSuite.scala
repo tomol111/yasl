@@ -98,10 +98,15 @@ class LexerSpec extends AnyFlatSpec:
 
 
   it should "detect keywords" in:
-    val result = scanTokens("let abc").toOption.get.map(disassembleToken)
+    val result = scanTokens("abc let true false and or not").toOption.get.map(disassembleToken)
     val expected = List(
+      Identifier -> "abc",  // not keyword
       Let -> "let",
-      Identifier -> "abc"
+      True -> "true",
+      False -> "false",
+      And -> "and",
+      Or -> "or",
+      Not -> "not",
     )
     assert(result == expected)
 
@@ -138,6 +143,26 @@ class ParserSpec extends AnyFlatSpec:
     assert(expr == Name("foo"))
     assert(rest == Nil)
 
+  it should "parse `true` literal" in:
+    val (expr, rest) = parseExpression(scanTokens("true").toOption.get)
+    assert(expr == Const(true))
+    assert(rest == Nil)
+
+  it should "parse `false` literal" in:
+    val (expr, rest) = parseExpression(scanTokens("false").toOption.get)
+    assert(expr == Const(false))
+    assert(rest == Nil)
+
+  it should "parse parenthesized expression" in:
+    val (expr, rest) = parseExpression(scanTokens("12 - (10 - 3)").toOption.get)
+    assert(expr == Binary(Const(12), Minus, Binary(Const(10), Minus, Const(3))))
+    assert(rest == Nil)
+
+  it should "parse exponent expression" in:
+    val (expr, rest) = parseExpression(scanTokens("2^10^3").toOption.get)
+    assert(expr == Binary(Const(2), Caret, Binary(Const(10), Caret, Const(3))))
+    assert(rest == Nil)
+
   it should "parse factor" in:
     val (expr, rest) = parseExpression(scanTokens("3 * 10 / 20").toOption.get)
     assert(expr == Binary(Binary(Const(3), Star, Const(10)), Slash, Const(20)))
@@ -167,14 +192,37 @@ class ParserSpec extends AnyFlatSpec:
     )
     assert(rest == Nil)
 
-  it should "parse parenthesized expression" in:
-    val (expr, rest) = parseExpression(scanTokens("12 - (10 - 3)").toOption.get)
-    assert(expr == Binary(Const(12), Minus, Binary(Const(10), Minus, Const(3))))
+  it should "parse negation" in:
+    val (expr, rest) = parseExpression(scanTokens("not 3 < 9").toOption.get)
+    assert(expr == Unary(Not, Binary(Const(3), Less, Const(9))))
     assert(rest == Nil)
 
-  it should "parse exponent expression" in:
-    val (expr, rest) = parseExpression(scanTokens("2^10^3").toOption.get)
-    assert(expr == Binary(Const(2), Caret, Binary(Const(10), Caret, Const(3))))
+  it should "parse `and` expr" in:
+    val (expr, rest) = parseExpression(scanTokens("not true and true and not false").toOption.get)
+    assert:
+      expr == LazyBinary(
+        LazyBinary(
+          Unary(Not, Const(true)),
+          And,
+          Const(true),
+        ),
+        And,
+        Unary(Not, Const(false)),
+      )
+    assert(rest == Nil)
+
+  it should "parse `or` expr" in:
+    val (expr, rest) = parseExpression(scanTokens("true or false and true or not false").toOption.get)
+    assert:
+      expr == LazyBinary(
+        LazyBinary(
+          Const(true),
+          Or,
+          LazyBinary(Const(false), And, Const(true)),
+        ),
+        Or,
+        Unary(Not, Const(false)),
+      )
     assert(rest == Nil)
 
 
@@ -216,14 +264,19 @@ class ParserSpec extends AnyFlatSpec:
 class InterpreterSuite extends AnyFlatSpec:
   behavior of "Interpreter - evaluate"
 
-  it should "eval constant" in:
+  it should "evalate constant" in:
     assert(eval(Const(10), Environment()) == 10.0)
 
-  it should "eval unary operation" in:
+  it should "evaluate variable to bounded value" in:
+    val env = Environment("x" -> 14)
+    assert(eval(Unary(Minus, Name("x")), env) == -14.0)
+
+  it should "evalate unary operation" in:
     assert(eval(Unary(Plus, Const(12)), Environment()) == 12.0)
     assert(eval(Unary(Minus, Const(10)), Environment()) == -10.0)
+    assert(eval(Unary(Not, Const(true)), Environment()) == false)
 
-  it should "eval binary operation" in:
+  it should "evalate binary operation" in:
     assert(eval(Binary(Const(3), Plus, Const(12)), Environment()) == 15.0)
     assert(eval(Binary(Const(4), Minus, Const(1)), Environment()) == 3.0)
     assert(eval(Binary(Const(3), Star, Const(10)), Environment()) == 30.0)
@@ -242,9 +295,14 @@ class InterpreterSuite extends AnyFlatSpec:
     assert(eval(Binary(Const(2), GreaterEqual, Const(2)), Environment()) == true)
     assert(eval(Binary(Const(2), GreaterEqual, Const(9)), Environment()) == false)
 
-  it should "evaluate variable to bounded value" in:
-    val env = Environment("x" -> 14)
-    assert(eval(Unary(Minus, Name("x")), env) == -14.0)
+  it should "evalate lazy binary operation" in:
+    assert(eval(LazyBinary(Const(true), And, Const(true)), Environment()) == true)
+    assert(eval(LazyBinary(Const(true), And, Const(false)), Environment()) == false)
+    assert(eval(LazyBinary(Const(false), Or, Const(true)), Environment()) == true)
+    assert(eval(LazyBinary(Const(false), Or, Const(false)), Environment()) == false)
+
+  ignore should "lazily evalate lazy binary operation" in:
+    ???  // language need side effects to test this
 
   it should "evaluate block with tail expression" in:
     val env = Environment()

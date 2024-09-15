@@ -21,11 +21,16 @@ def eval(expr: Expr, env: Environment): YaslValue = expr match
 
   case Name(variable) => env(variable)
 
-  case Unary(op, operand) => eval(operand, env) match
-    case value: Double => op match
-      case Plus => value
-      case Minus => -value
-    case YaslNil => ???
+  case Unary(op, operand) => op match
+    case Plus => eval(operand, env) match
+      case value: Double => value
+      case _ => ???
+    case Minus => eval(operand, env) match
+      case value: Double => -value
+      case _ => ???
+    case Not => eval(operand, env) match
+      case value: Boolean => !value
+      case _ => ???
 
   case Binary(left, op, right) => (eval(left, env), eval(right, env)) match
     case (leftVal: Double, rightVal: Double) => op match
@@ -41,6 +46,10 @@ def eval(expr: Expr, env: Environment): YaslValue = expr match
       case LessEqual => leftVal <= rightVal
       case GreaterEqual => leftVal >= rightVal
     case (_, _) => ???
+
+  case LazyBinary(left, op, right) => op match
+    case And => eval(left, env).asInstanceOf[Boolean] && eval(right, env).asInstanceOf[Boolean]
+    case Or => eval(left, env).asInstanceOf[Boolean] || eval(right, env).asInstanceOf[Boolean]
 
   case Block(stmts, expr) =>
     stmts.foreach(exec(_, env))
@@ -62,17 +71,21 @@ object YaslNil
 // ======
 
 /*
- * block        ::= statement* expression?
+ * block        ::= {statement} [expression]
  *
  * statement    ::= "let" IDENTIFIER "=" expression ";"
  *                | expression ";"
  *
- * expression   ::= comparison
- * comparison   ::= term ((">"|">="|"<"|"<="|"!="|"==") term)?
- * term         ::= ("+"|"-")? factor | term ("+"|"-") factor
+ * expression   ::= or_expr
+ * or_expr      ::= and_expr | or_expr "or" and_expr
+ * and_expr     ::= not_expr | and_expr "or" not_expr
+ * and_expr     ::= [and_expr "or"] negation
+ * negation     ::= ["not"] comparison
+ * comparison   ::= term [(">"|">="|"<"|"<="|"!="|"==") term]
+ * term         ::= ["+"|"-"] factor | term ("+"|"-") factor
  * factor       ::= power | factor ("*"|"/") power
- * power        ::= primary ("^" power)?
- * primary      ::= IDENTIFIER | NUMBER | "(" expression ")"
+ * power        ::= primary ["^" power]
+ * primary      ::= IDENTIFIER | NUMBER | "true" | "false" | "(" expression ")"
  */
 
 
@@ -126,7 +139,42 @@ def parseStatement(tokens: List[Token]): (Stmt, List[Token]) = tokens match
 
 
 def parseExpression(tokens: List[Token]): (Expr, List[Token]) =
-  parseComparison(tokens)
+  parseOrExpr(tokens)
+
+
+def parseOrExpr(tokens: List[Token]): (Expr, List[Token]) =
+  val (expr, tail) = parseAndExpr(tokens)
+  _parseOrExpr(expr, tail)
+
+def _parseOrExpr(left: Expr, tokens: List[Token]): (Expr, List[Token]) =
+  tokens match
+    case Token(Or, _, _) :: tailWithOperand =>
+      val (right, tail) = parseAndExpr(tailWithOperand)
+      _parseOrExpr(LazyBinary(left, Or, right), tail)
+    case rest =>
+      (left, rest)
+
+
+def parseAndExpr(tokens: List[Token]): (Expr, List[Token]) =
+  val (expr, tail) = parseNegation(tokens)
+  _parseAndExpr(expr, tail)
+
+def _parseAndExpr(left: Expr, tokens: List[Token]): (Expr, List[Token]) =
+  tokens match
+    case Token(And, _, _) :: tailWithOperand =>
+      val (right, tail) = parseNegation(tailWithOperand)
+      _parseAndExpr(LazyBinary(left, And, right), tail)
+    case rest =>
+      (left, rest)
+
+
+def parseNegation(tokens: List[Token]): (Expr, List[Token]) =
+  tokens match
+    case Token(Not, _, _) :: tail =>
+      val (expr, rest) = parseComparison(tail)
+      (Unary(Not, expr), rest)
+    case _ =>
+      parseComparison(tokens)
 
 
 type ComparisonOp = EqEqual.type | NotEqual.type | Less.type | Greater.type | LessEqual.type | GreaterEqual.type
@@ -192,6 +240,10 @@ def parsePrimary(tokens: List[Token]): (Expr, List[Token]) =
       (Name(lexeme), rest)
     case Token(Num, lexeme, _) :: rest =>
       (Const(lexeme.toDouble), rest)
+    case Token(True, _, _) :: rest =>
+      (Const(true), rest)
+    case Token(False, _, _) :: rest =>
+      (Const(false), rest)
     case Token(LParen, _, _) :: tailWithExpresion =>
       val (expr, tailWithCloseParen) = parseExpression(tailWithExpresion)
       tailWithCloseParen match
@@ -212,13 +264,15 @@ case class LetStmt(target: Name, value: Expr) extends Stmt
 
 sealed trait Expr extends Stmt
 case class Block(stmts: List[Stmt], expr: Option[Expr] = None) extends Expr
+case class LazyBinary(left: Expr, op: LazyOp, right: Expr) extends Expr
 case class Binary(left: Expr, op: InfixOp, right: Expr) extends Expr
 case class Unary(op: PrefixOp, operand: Expr) extends Expr
 case class Const(value: YaslValue) extends Expr
 case class Name(value: String) extends Expr
 
+type LazyOp = And.type | Or.type
 type InfixOp = TermOp | FactorOp | Caret.type | ComparisonOp
-type PrefixOp = TermOp
+type PrefixOp = TermOp | Not.type
 
 
 // Lexer
@@ -238,6 +292,9 @@ enum TokenType extends LexemeType:
   case Equal
   case Colon
 
+  case And, Or, Not
+  case True, False
+
   case Let
 
 export WhiteLexeme.*
@@ -248,6 +305,11 @@ enum WhiteLexeme extends LexemeType:
 
 val keywords = Map[String, TokenType](
   "let" -> Let,
+  "true" -> True,
+  "false" -> False,
+  "and" -> And,
+  "or" -> Or,
+  "not" -> Not,
 )
 
 
