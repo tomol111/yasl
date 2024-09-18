@@ -55,6 +55,14 @@ def eval(expr: Expr, env: Environment): YaslValue = expr match
     stmts.foreach(exec(_, env))
     expr.map(eval(_, env)).getOrElse(YaslNil)
 
+  case IfExpr(condition, thenBranch, elseBranch) =>
+    eval(condition, env) match
+      case true =>
+        eval(thenBranch, env)
+      case false =>
+        elseBranch.map(eval(_, env)).getOrElse(YaslNil)
+      case _ => ???
+
 
 type Environment = collection.mutable.Map[String, YaslValue]
 object Environment:
@@ -71,31 +79,47 @@ object YaslNil
 // ======
 
 /*
- * block        ::= {statement} [expression]
+ * block        ::= "{" block_content "}"
+ * block_content::= {statement} [expression]
  *
  * statement    ::= "let" IDENTIFIER "=" expression ";"
  *                | expression ";"
  *
- * expression   ::= or_expr
- * or_expr      ::= and_expr | or_expr "or" and_expr
- * and_expr     ::= not_expr | and_expr "or" not_expr
+ * expression   ::= if_expr
+ *                | or_expr
+ *
+ * -- `if`'s condition could also be `expression`
+ * if_expr      ::= "if" or_expr block ["else" (if_expr | block)]
+ *
+ * or_expr      ::= [or_expr "or"] and_expr
  * and_expr     ::= [and_expr "or"] negation
  * negation     ::= ["not"] comparison
  * comparison   ::= term [(">"|">="|"<"|"<="|"!="|"==") term]
  * term         ::= ["+"|"-"] factor | term ("+"|"-") factor
- * factor       ::= power | factor ("*"|"/") power
+ * factor       ::= [factor ("*"|"/")] power
  * power        ::= primary ["^" power]
  * primary      ::= IDENTIFIER | NUMBER | "true" | "false" | "(" expression ")"
  */
 
 
 def parse(tokens: List[Token]): Block =
-  val (ast, rest) = parseBlock(tokens)
+  val (ast, rest) = parseBlockContent(tokens)
   assert(rest == Nil)
   ast
 
 
 def parseBlock(tokens: List[Token]): (Block, List[Token]) =
+  tokens match
+    case Token(LBrace, _, _) :: tailWithContent =>
+      val (block, tailWithRBrace) = parseBlockContent(tailWithContent)
+      tailWithRBrace match
+        case Token(RBrace, _, _) :: rest =>
+          (block, rest)
+        case _ => ???
+    case _ => ???
+
+
+def parseBlockContent(tokens: List[Token]): (Block, List[Token]) =
   val stmts = collection.mutable.ListBuffer.empty[Stmt]
   var expr: Option[Expr] = None
   def go(tokens: List[Token]): List[Token] =
@@ -113,16 +137,6 @@ def parseBlock(tokens: List[Token]): (Block, List[Token]) =
   val rest = go(tokens)
   (Block(stmts.toList, expr), rest)
 
-def _parseBlock(tokens: List[Token]): Block =
-  val stmts = collection.mutable.ListBuffer.empty[Stmt]
-  def go(tokens: List[Token]): Unit =
-    if tokens.nonEmpty then
-      val (stmt, rest) = parseStatement(tokens)
-      stmts += stmt
-      go(rest)
-  go(tokens)
-  Block(stmts.toList)
-
 
 def parseStatement(tokens: List[Token]): (Stmt, List[Token]) = tokens match
   case Token(Let, _, _) :: Token(Identifier, target, _) :: Token(Equal, _, _) :: tailWithValue =>
@@ -139,7 +153,25 @@ def parseStatement(tokens: List[Token]): (Stmt, List[Token]) = tokens match
 
 
 def parseExpression(tokens: List[Token]): (Expr, List[Token]) =
-  parseOrExpr(tokens)
+  if tokens.head.typ == If
+    then parseIfExpr(tokens)
+    else parseOrExpr(tokens)
+
+
+def parseIfExpr(tokens: List[Token]): (Expr, List[Token]) = tokens match
+  case Token(If, _, _) :: tailWithCondition =>
+    val (condition, tailWithThenBranch) = parseOrExpr(tailWithCondition)
+    val (thenBranch, tail) = parseBlock(tailWithThenBranch)
+    tail match
+      case Token(Else, _, _) :: tailWithElseBranch =>
+        val (elseBranch, rest) =
+          if tailWithElseBranch.head.typ == If
+            then parseIfExpr(tailWithElseBranch)
+            else parseBlock(tailWithElseBranch)
+        (IfExpr(condition, thenBranch, Some(elseBranch)), rest)
+      case rest =>
+        (IfExpr(condition, thenBranch), rest)
+  case _ => ???
 
 
 def parseOrExpr(tokens: List[Token]): (Expr, List[Token]) =
@@ -263,6 +295,7 @@ sealed trait Stmt extends AST
 case class LetStmt(target: Name, value: Expr) extends Stmt
 
 sealed trait Expr extends Stmt
+case class IfExpr(condition: Expr, thenBranch: Expr, elseBranch: Option[Expr] = None) extends Expr
 case class Block(stmts: List[Stmt], expr: Option[Expr] = None) extends Expr
 case class LazyBinary(left: Expr, op: LazyOp, right: Expr) extends Expr
 case class Binary(left: Expr, op: InfixOp, right: Expr) extends Expr
@@ -288,7 +321,7 @@ enum TokenType extends LexemeType:
 
   case Plus, Minus, Star, Slash, Caret
   case EqEqual, NotEqual, Less, Greater, LessEqual, GreaterEqual
-  case LParen, RParen
+  case LParen, RParen, LBrace, RBrace
   case Equal
   case Colon
 
@@ -296,6 +329,7 @@ enum TokenType extends LexemeType:
   case True, False
 
   case Let
+  case If, Else
 
 export WhiteLexeme.*
 enum WhiteLexeme extends LexemeType:
@@ -310,6 +344,8 @@ val keywords = Map[String, TokenType](
   "and" -> And,
   "or" -> Or,
   "not" -> Not,
+  "if" -> If,
+  "else" -> Else,
 )
 
 
@@ -325,6 +361,8 @@ val lexemePatterns = List[(Regex, LexemeType)](
   "\\^".r -> Caret,
   "\\(".r -> LParen,
   "\\)".r -> RParen,
+  "\\{".r -> LBrace,
+  "\\}".r -> RBrace,
   ";".r -> Colon,
   "==".r -> EqEqual,
   "!=".r -> NotEqual,

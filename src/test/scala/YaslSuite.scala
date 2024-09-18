@@ -10,7 +10,7 @@ class LexerSpec extends AnyFlatSpec:
   behavior of "Lexer"
 
   it should "parse operators" in:
-    val result = scanTokens("+ - * / ^ ( ) = ; == != < > <= >=").toOption.get.map(disassembleToken)
+    val result = scanTokens("+ - * / ^ ( ) { } = ; == != < > <= >=").toOption.get.map(disassembleToken)
     val expected = List(
       Plus -> "+",
       Minus -> "-",
@@ -19,6 +19,8 @@ class LexerSpec extends AnyFlatSpec:
       Caret -> "^",
       LParen -> "(",
       RParen -> ")",
+      LBrace -> "{",
+      RBrace -> "}",
       Equal -> "=",
       Colon -> ";",
       EqEqual -> "==",
@@ -98,7 +100,7 @@ class LexerSpec extends AnyFlatSpec:
 
 
   it should "detect keywords" in:
-    val result = scanTokens("abc let true false and or not").toOption.get.map(disassembleToken)
+    val result = scanTokens("abc let true false and or not if else").toOption.get.map(disassembleToken)
     val expected = List(
       Identifier -> "abc",  // not keyword
       Let -> "let",
@@ -107,6 +109,8 @@ class LexerSpec extends AnyFlatSpec:
       And -> "and",
       Or -> "or",
       Not -> "not",
+      If -> "if",
+      Else -> "else",
     )
     assert(result == expected)
 
@@ -225,6 +229,50 @@ class ParserSpec extends AnyFlatSpec:
       )
     assert(rest == Nil)
 
+  it should "parse `if` expression" in:
+    val (expr, rest) = parseExpression(scanTokens("if false or true {1}").toOption.get)
+    assert:
+      expr == IfExpr(
+        LazyBinary(Const(false), Or, Const(true)),
+        Block(Nil, Some(Const(1))),
+      )
+    assert(rest == Nil)
+
+  it should "parse `if` expression with `else` branch" in:
+    val (expr, rest) = parseExpression(scanTokens("if cond {1} else {2}").toOption.get)
+    assert:
+      expr == IfExpr(
+        Name("cond"),
+        Block(Nil, Some(Const(1))),
+        Some(Block(Nil, Some(Const(2)))),
+      )
+    assert(rest == Nil)
+
+  it should "chain `if` expressions" in:
+    val input = """
+      if cond {
+          1
+      } else if cond2 {
+          2
+      } else {
+          3
+      }
+    """
+    val (expr, rest) = parseExpression(scanTokens(input).toOption.get)
+    assert:
+      expr == IfExpr(
+        Name("cond"),
+        Block(Nil, Some(Const(1))),
+        Some(
+          IfExpr(
+            Name("cond2"),
+            Block(Nil, Some(Const(2))),
+            Some(Block(Nil, Some(Const(3)))),
+          )
+        ),
+      )
+    assert(rest == Nil)
+
 
   behavior of "Parser - parsing statements"
 
@@ -241,8 +289,8 @@ class ParserSpec extends AnyFlatSpec:
 
   behavior of "Parser - parsing block"
 
-  it should "parse block" in:
-    val (block, rest) = parseBlock(scanTokens("let x = 10; let y = x * 3;").toOption.get)
+  it should "parse block content" in:
+    val (block, rest) = parseBlockContent(scanTokens("let x = 10; let y = x * 3;").toOption.get)
     assert:
       block == Block:
         List(
@@ -252,7 +300,16 @@ class ParserSpec extends AnyFlatSpec:
     assert(rest == Nil)
 
   it should "parse block ending with expression" in:
-    val (block, rest) = parseBlock(scanTokens("let x = 10; x * 3").toOption.get)
+    val (block, rest) = parseBlockContent(scanTokens("let x = 10; x * 3").toOption.get)
+    assert:
+      block == Block(
+        List(LetStmt(Name("x"), Const(10))),
+        Some(Binary(Name("x"), Star, Const(3))),
+      )
+    assert(rest == Nil)
+
+  it should "parse block" in:
+    val (block, rest) = parseBlock(scanTokens("{ let x = 10; x * 3 }").toOption.get)
     assert:
       block == Block(
         List(LetStmt(Name("x"), Const(10))),
@@ -319,6 +376,25 @@ class InterpreterSuite extends AnyFlatSpec:
         LetStmt(Name("x"), Const(10)), LetStmt(Name("y"), Binary(Name("x"), Plus, Const(5)))
       )
     assert(eval(block, env) == YaslNil)
+
+  it should "evaluate `if` expression" in:
+    val env = Environment()
+    val ifExpr = IfExpr(Name("cond"), Const(1), Some(Const(2)))
+    env("cond") = true
+    assert(eval(ifExpr, env) == 1.0)
+    env("cond") = false
+    assert(eval(ifExpr, env) == 2.0)
+
+  it should "evaluate `if` expression even without `else` branch" in:
+    val env = Environment()
+    val ifExpr = IfExpr(Name("cond"), Const(1))
+    env("cond") = true
+    assert(eval(ifExpr, env) == 1.0)
+    env("cond") = false
+    assert(eval(ifExpr, env) == YaslNil)
+
+  ignore should "lazily evaluate `if` expression" in:
+    ???  // language need side effects to test this
 
 
   behavior of "Interpreter - execute"
