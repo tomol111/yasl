@@ -109,47 +109,33 @@ def parse(tokens: List[Token]): Block =
 
 
 def parseBlock(tokens: List[Token]): (Block, List[Token]) =
-  tokens match
-    case Token(LBrace, _, _) :: tailWithContent =>
-      val (block, tailWithRBrace) = parseBlockContent(tailWithContent)
-      tailWithRBrace match
-        case Token(RBrace, _, _) :: rest =>
-          (block, rest)
-        case _ => ???
-    case _ => ???
+  val (block, rest) = parseBlockContent(tokens.consume(LBrace))
+  (block, rest.consume(RBrace))
 
 
 def parseBlockContent(tokens: List[Token]): (Block, List[Token]) =
   val stmts = collection.mutable.ListBuffer.empty[Stmt]
-  var expr: Option[Expr] = None
-  def go(tokens: List[Token]): List[Token] =
+  def go(tokens: List[Token]): (Block, List[Token]) =
     Try(parseStatement(tokens)) match
       case Success(stmt, rest) =>
         stmts += stmt
         go(rest)
       case Failure(_) =>
         Try(parseExpression(tokens)) match
-          case Success(expr_, rest) =>
-            expr = Some(expr_)
-            rest
+          case Success(expr, rest) =>
+            (Block(stmts.toList, Some(expr)), rest)
           case Failure(_) =>
-            tokens
-  val rest = go(tokens)
-  (Block(stmts.toList, expr), rest)
+            (Block(stmts.toList), tokens)
+  go(tokens)
 
 
 def parseStatement(tokens: List[Token]): (Stmt, List[Token]) = tokens match
   case Token(Let, _, _) :: Token(Identifier, target, _) :: Token(Equal, _, _) :: tailWithValue =>
-    val (expr, tailWithColon) = parseExpression(tailWithValue)
-    tailWithColon match
-      case Token(Colon, _, _) :: rest =>
-        (LetStmt(Name(target), expr), rest)
-      case _ => ???
+    val (expr, rest) = parseExpression(tailWithValue)
+    (LetStmt(Name(target), expr), rest.consume(Colon))
   case tokens =>
     val (expr, rest) = parseExpression(tokens)
-    rest match
-      case Token(Colon, _, _) :: rest => (expr, rest)
-      case _ => ???
+    (expr, rest.consume(Colon))
 
 
 def parseExpression(tokens: List[Token]): (Expr, List[Token]) =
@@ -158,20 +144,18 @@ def parseExpression(tokens: List[Token]): (Expr, List[Token]) =
     else parseOrExpr(tokens)
 
 
-def parseIfExpr(tokens: List[Token]): (Expr, List[Token]) = tokens match
-  case Token(If, _, _) :: tailWithCondition =>
-    val (condition, tailWithThenBranch) = parseOrExpr(tailWithCondition)
-    val (thenBranch, tail) = parseBlock(tailWithThenBranch)
-    tail match
-      case Token(Else, _, _) :: tailWithElseBranch =>
-        val (elseBranch, rest) =
-          if tailWithElseBranch.head.typ == If
-            then parseIfExpr(tailWithElseBranch)
-            else parseBlock(tailWithElseBranch)
-        (IfExpr(condition, thenBranch, Some(elseBranch)), rest)
-      case rest =>
-        (IfExpr(condition, thenBranch), rest)
-  case _ => ???
+def parseIfExpr(tokens: List[Token]): (Expr, List[Token]) =
+  val (condition, tailWithThenBranch) = parseOrExpr(tokens.consume(If))
+  val (thenBranch, tail) = parseBlock(tailWithThenBranch)
+  tail match
+    case Token(Else, _, _) :: tailWithElseBranch =>
+      val (elseBranch, rest) =
+        if tailWithElseBranch.head.typ == If
+          then parseIfExpr(tailWithElseBranch)
+          else parseBlock(tailWithElseBranch)
+      (IfExpr(condition, thenBranch, Some(elseBranch)), rest)
+    case rest =>
+      (IfExpr(condition, thenBranch), rest)
 
 
 def parseOrExpr(tokens: List[Token]): (Expr, List[Token]) =
@@ -277,12 +261,16 @@ def parsePrimary(tokens: List[Token]): (Expr, List[Token]) =
     case Token(False, _, _) :: rest =>
       (Const(false), rest)
     case Token(LParen, _, _) :: tailWithExpresion =>
-      val (expr, tailWithCloseParen) = parseExpression(tailWithExpresion)
-      tailWithCloseParen match
-        case Token(RParen, _, _) :: rest =>
-          (expr, rest)
-        case _ => ???
+      val (expr, rest) = parseExpression(tailWithExpresion)
+      (expr, rest.consume(RParen))
     case _ => ???
+
+
+extension (tokens: List[Token])
+  def consume(typ: TokenType): List[Token] =
+    if tokens.head.typ == typ
+      then tokens.tail
+      else ???
 
 
 // AST
