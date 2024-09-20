@@ -401,8 +401,15 @@ class InterpreterSuite extends AnyFlatSpec:
     assert(eval(LazyBinary(Const(false), Or, Const(true)), Environment()) == true)
     assert(eval(LazyBinary(Const(false), Or, Const(false)), Environment()) == false)
 
-  ignore should "lazily evalate lazy binary operation" in:
-    ???  // language need side effects to test this
+  it should "lazily evalate right-hand side of lazy binary operation" in:
+    var called = false
+    val callable = new YaslCallable:
+      def call(args: List[YaslValue]): YaslValue =
+        called = true
+        false
+
+    val result = eval(LazyBinary(Const(true), And, Call(Name("foo"), Nil)), Environment("foo" -> callable))
+    assert(result == false)
 
   it should "evaluate block with tail expression" in:
     val env = Environment()
@@ -436,9 +443,31 @@ class InterpreterSuite extends AnyFlatSpec:
     env("cond") = false
     assert(eval(ifExpr, env) == YaslNil)
 
-  ignore should "lazily evaluate `if` expression" in:
-    ???  // language need side effects to test this
+  it should "lazily evaluate `if` expression branches" in:
+    var (thenEvaluated, elseEvaluated) = (false, false)
+    val callableFoo = new YaslCallable:
+      def call(args: List[YaslValue]): YaslValue =
+        thenEvaluated = true
+        YaslNil
+    val callableBar = new YaslCallable:
+      def call(args: List[YaslValue]): YaslValue =
+        elseEvaluated = true
+        YaslNil
 
+    val env = Environment("foo" -> callableFoo, "bar" -> callableBar)
+    val ifExpr = IfExpr(Name("cond"), Call(Name("foo"), Nil), Some(Call(Name("bar"), Nil)))
+
+    env("cond") = true
+    eval(ifExpr, env)
+    assert(thenEvaluated)
+    assert(!elseEvaluated)
+
+    thenEvaluated = false
+
+    env("cond") = false
+    eval(ifExpr, env)
+    assert(!thenEvaluated)
+    assert(elseEvaluated)
 
   behavior of "Interpreter - execute"
 
