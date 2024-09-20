@@ -9,8 +9,8 @@ def disassembleToken(token: Token): (TokenType, String) = (token.typ, token.lexe
 class LexerSpec extends AnyFlatSpec:
   behavior of "Lexer"
 
-  it should "parse operators" in:
-    val result = scanTokens("+ - * / ^ ( ) { } = ; == != < > <= >=").toOption.get.map(disassembleToken)
+  it should "parse operators and punctuations" in:
+    val result = scanTokens("+ - * / ^ ( ) { } = ; , == != < > <= >=").toOption.get.map(disassembleToken)
     val expected = List(
       Plus -> "+",
       Minus -> "-",
@@ -23,6 +23,7 @@ class LexerSpec extends AnyFlatSpec:
       RBrace -> "}",
       Equal -> "=",
       Colon -> ";",
+      Comma -> ",",
       EqEqual -> "==",
       NotEqual -> "!=",
       Less -> "<",
@@ -160,6 +161,38 @@ class ParserSpec extends AnyFlatSpec:
   it should "parse parenthesized expression" in:
     val (expr, rest) = parseExpression(scanTokens("12 - (10 - 3)").toOption.get)
     assert(expr == Binary(Const(12), Minus, Binary(Const(10), Minus, Const(3))))
+    assert(rest == Nil)
+
+  it should "parse call with no arguments" in:
+    val (expr, rest) = parseExpression(scanTokens("foo()").toOption.get)
+    assert(expr == Call(Name("foo"), Nil))
+    assert(rest == Nil)
+
+  it should "parse call with arguments" in:
+    val (expr, rest) = parseExpression(scanTokens("foo(x, -3, true)").toOption.get)
+    assert:
+      expr == Call(
+        Name("foo"),
+        List(Name("x"), Unary(Minus, Const(3)), Const(true))
+      )
+    assert(rest == Nil)
+
+  it should "parse call with trailing comma" in:
+    val (expr, rest) = parseExpression(scanTokens("foo(x,)").toOption.get)
+    assert:
+      expr == Call(
+        Name("foo"),
+        List(Name("x")),
+      )
+    assert(rest == Nil)
+
+  it should "recursively parse call" in:
+    val (expr, rest) = parseExpression(scanTokens("foo(1)(2)").toOption.get)
+    assert:
+      expr == Call(
+        Call(Name("foo"), List(Const(1))),
+        List(Const(2)),
+      )
     assert(rest == Nil)
 
   it should "parse exponent expression" in:

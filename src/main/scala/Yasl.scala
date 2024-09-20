@@ -98,7 +98,9 @@ object YaslNil
  * term         ::= ["+"|"-"] factor | term ("+"|"-") factor
  * factor       ::= [factor ("*"|"/")] power
  * power        ::= primary ["^" power]
- * primary      ::= IDENTIFIER | NUMBER | "true" | "false" | "(" expression ")"
+ * primary      ::= atom | primary "(" argument_list ")"
+ * argument_list::= [expression {"," expression} [","]]
+ * atom         ::= IDENTIFIER | NUMBER | "true" | "false" | "(" expression ")"
  */
 
 
@@ -251,6 +253,37 @@ def parsePower(tokens: List[Token]): (Expr, List[Token]) =
 
 
 def parsePrimary(tokens: List[Token]): (Expr, List[Token]) =
+  val (atom, tail) = parseAtom(tokens)
+  _parsePrimary(atom, tail)
+
+def _parsePrimary(primary: Expr, tokens: List[Token]): (Expr, List[Token]) =
+  tokens match
+    case Token(LParen, _, _) :: tailWithArguments =>
+      val (arguments, tail) = parseArgumentList(tailWithArguments)
+      _parsePrimary(Call(primary, arguments), tail.consume(RParen))
+    case rest =>
+      (primary, rest)
+
+
+def parseArgumentList(tokens: List[Token]): (List[Expr], List[Token]) =
+  val (arguments, tail) =
+    Try(parseExpression(tokens)) match
+      case Success(firstArg, tailWithNextArguments) =>
+        _parseNextArguments(List(firstArg), tailWithNextArguments)
+      case _ =>
+        (Nil, tokens)
+  val rest = Try(tail.consume(Comma)).getOrElse(tail)
+  (arguments.reverse, rest)
+
+def _parseNextArguments(arguments: List[Expr], tokens: List[Token]): (List[Expr], List[Token]) =
+  Try(parseExpression(tokens.consume(Comma))) match
+    case Success(arg, tail) =>
+      _parseNextArguments(arg :: arguments, tail)
+    case _ =>
+      (arguments, tokens)
+
+
+def parseAtom(tokens: List[Token]): (Expr, List[Token]) =
   tokens match
     case Token(Identifier, lexeme, _) :: rest =>
       (Name(lexeme), rest)
@@ -267,10 +300,9 @@ def parsePrimary(tokens: List[Token]): (Expr, List[Token]) =
 
 
 extension (tokens: List[Token])
-  def consume(typ: TokenType): List[Token] =
-    if tokens.head.typ == typ
-      then tokens.tail
-      else ???
+  def consume(typ: TokenType): List[Token] = tokens match
+    case Token(foundType, _, _) :: rest if foundType == typ => rest
+    case _ => ???
 
 
 // AST
@@ -288,6 +320,7 @@ case class Block(stmts: List[Stmt], expr: Option[Expr] = None) extends Expr
 case class LazyBinary(left: Expr, op: LazyOp, right: Expr) extends Expr
 case class Binary(left: Expr, op: InfixOp, right: Expr) extends Expr
 case class Unary(op: PrefixOp, operand: Expr) extends Expr
+case class Call(callee: Expr, arguments: List[Expr]) extends Expr
 case class Const(value: YaslValue) extends Expr
 case class Name(value: String) extends Expr
 
@@ -311,7 +344,7 @@ enum TokenType extends LexemeType:
   case EqEqual, NotEqual, Less, Greater, LessEqual, GreaterEqual
   case LParen, RParen, LBrace, RBrace
   case Equal
-  case Colon
+  case Colon, Comma
 
   case And, Or, Not
   case True, False
@@ -352,6 +385,7 @@ val lexemePatterns = List[(Regex, LexemeType)](
   "\\{".r -> LBrace,
   "\\}".r -> RBrace,
   ";".r -> Colon,
+  ",".r -> Comma,
   "==".r -> EqEqual,
   "!=".r -> NotEqual,
   "<=".r -> LessEqual,
