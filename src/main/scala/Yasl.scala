@@ -21,6 +21,12 @@ def eval(expr: Expr, env: Environment): YaslValue = expr match
 
   case Name(variable) => env(variable)
 
+  case Call(callee, arguments) => eval(callee, env) match
+    case calleeVal: YaslCallable =>
+      val argumentVals = arguments.map(eval(_, env))
+      calleeVal.call(argumentVals)
+    case _ => ???
+
   case Unary(op, operand) => op match
     case Plus => eval(operand, env) match
       case value: Double => value
@@ -70,9 +76,12 @@ object Environment:
     collection.mutable.Map[String, YaslValue](items*)
 
 
-type YaslValue = Double | Boolean | YaslNil.type
+type YaslValue = Double | Boolean | YaslNil.type | YaslCallable
 
 object YaslNil
+
+trait YaslCallable:
+  def call(args: List[YaslValue]): YaslValue
 
 
 // Parser

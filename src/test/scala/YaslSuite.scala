@@ -361,6 +361,16 @@ class InterpreterSuite extends AnyFlatSpec:
     val env = Environment("x" -> 14)
     assert(eval(Unary(Minus, Name("x")), env) == -14.0)
 
+  it should "evaluate call" in:
+    val callee = new YaslCallable:
+      def call(args: List[YaslValue]): YaslValue =
+        assert(args == List(1.0, true))
+        10.0
+
+    val env = Environment("foo" -> callee, "x" -> true)
+    val result = eval(Call(Name("foo"), List(Const(1), Name("x"))), env)
+    assert(result == 10.0)
+
   it should "evalate unary operation" in:
     assert(eval(Unary(Plus, Const(12)), Environment()) == 12.0)
     assert(eval(Unary(Minus, Const(10)), Environment()) == -10.0)
