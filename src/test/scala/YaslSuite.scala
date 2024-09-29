@@ -351,6 +351,22 @@ class ParserSpec extends AnyFlatSpec:
     assert(rest == Nil)
 
 
+class BuildinsSuite extends AnyFlatSpec:
+  "function: print" should "print arguments" in:
+    val outputCapture = java.io.ByteArrayOutputStream()
+    val result = Console.withOut(outputCapture):
+      yaslPrint.call(List(0.0, 1.2))
+    assert(outputCapture.toString == "0.01.2")
+    assert(result == YaslNil)
+
+  "function: println" should "print arguments and new line" in:
+    val outputCapture = java.io.ByteArrayOutputStream()
+    val result = Console.withOut(outputCapture):
+      yaslPrintln.call(List(1.0, 1.2))
+    assert(outputCapture.toString == "1.01.2\n")
+    assert(result == YaslNil)
+
+
 class InterpreterSuite extends AnyFlatSpec:
   behavior of "Interpreter - evaluate"
 

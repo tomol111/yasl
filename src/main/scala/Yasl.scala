@@ -84,6 +84,25 @@ trait YaslCallable:
   def call(args: List[YaslValue]): YaslValue
 
 
+// Build-in
+// ========
+
+
+object yaslPrint extends YaslCallable:
+  def call(args: List[YaslValue]): YaslNil.type =
+    for arg <- args do
+      print(arg)
+    YaslNil
+
+
+object yaslPrintln extends YaslCallable:
+  def call(args: List[YaslValue]): YaslNil.type =
+    for arg <- args do
+      print(arg)
+    println()
+    YaslNil
+
+
 // Parser
 // ======
 

@@ -16,7 +16,9 @@ import util.boundary, boundary.break
 
 def runPrompt(): Unit =
   println("YASL")
-  val env = Environment()
+  val env = Environment(
+    "println" -> yaslPrintln,
+  )
   def step(): Unit =
     print("> ")
     io.StdIn.readLine() match
