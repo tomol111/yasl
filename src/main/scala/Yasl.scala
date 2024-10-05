@@ -76,7 +76,7 @@ object Environment:
     collection.mutable.Map[String, YaslValue](items*)
 
 
-type YaslValue = Double | Boolean | YaslNil.type | YaslCallable
+type YaslValue = Double | String | Boolean | YaslNil.type | YaslCallable
 
 object YaslNil
 
@@ -315,8 +315,10 @@ def parseAtom(tokens: List[Token]): (Expr, List[Token]) =
   tokens match
     case Token(Identifier, lexeme, _) :: rest =>
       (Name(lexeme), rest)
-    case Token(Num, lexeme, _) :: rest =>
+    case Token(NumberLiteral, lexeme, _) :: rest =>
       (Const(lexeme.toDouble), rest)
+    case Token(StringLiteral, lexeme, _) :: rest =>
+      (Const(unescapeString(lexeme.tail.init)), rest)
     case Token(True, _, _) :: rest =>
       (Const(true), rest)
     case Token(False, _, _) :: rest =>
@@ -325,6 +327,30 @@ def parseAtom(tokens: List[Token]): (Expr, List[Token]) =
       val (expr, rest) = parseExpression(tailWithExpresion)
       (expr, rest.consume(RParen))
     case _ => ???
+
+
+def unescapeString(str: String): String =
+  if !str.contains('\\') then
+    str
+  else
+    val unescapedString = StringBuffer()
+    var index = 0
+    while index < str.length do
+      if str(index) == '\\' then
+        unescapedString.append:
+          str(index+1) match
+            case 't' => '\t'
+            case 'n' => '\n'
+            case 'f' => '\f'
+            case 'r' => '\r'
+            case '"' => '"'
+            case '\\' => '\\'
+            case other => ???
+        index += 2
+      else
+        unescapedString.append(str(index))
+        index += 1
+    unescapedString.toString
 
 
 extension (tokens: List[Token])
@@ -365,7 +391,7 @@ sealed trait LexemeType
 
 export TokenType.*
 enum TokenType extends LexemeType:
-  case Num
+  case NumberLiteral, StringLiteral
   case Identifier
 
   case Plus, Minus, Star, Slash, Caret
@@ -401,7 +427,8 @@ val keywords = Map[String, TokenType](
 val lexemePatterns = List[(Regex, LexemeType)](
   "\\s+".r -> WhiteSpace,
   "#.*".r -> Comment,
-  raw"\d+(\.\d+)?".r -> Num,
+  raw"\d+(\.\d+)?".r -> NumberLiteral,
+  raw"\"(\\[tnfr\"\\]|[^\"])*\"".r -> StringLiteral,
   raw"[\w&&[^\d]]\w*".r -> Identifier,
   "\\+".r -> Plus,
   "-".r -> Minus,

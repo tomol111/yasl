@@ -37,7 +37,7 @@ class LexerSpec extends AnyFlatSpec:
   it should "parse numbers" in:
     val result = scanTokens("123").toOption.get.map(disassembleToken)
     val expected = List(
-      Num -> "123",
+      NumberLiteral -> "123",
     )
     assert(result == expected)
 
@@ -45,7 +45,7 @@ class LexerSpec extends AnyFlatSpec:
   it should "parse floting point numbers" in:
     val result = scanTokens("123.456").toOption.get.map(disassembleToken)
     val expected = List(
-      Num -> "123.456",
+      NumberLiteral -> "123.456",
     )
     assert(result == expected)
 
@@ -57,13 +57,19 @@ class LexerSpec extends AnyFlatSpec:
     )
     assert(result == expected)
 
+  it should "parse string" in:
+    val result = scanTokens("\" ab \\t \\n \\f \\r \\\" \\ \"").toOption.get.map(disassembleToken)
+    val expected = List(
+      StringLiteral -> "\" ab \\t \\n \\f \\r \\\" \\ \"",
+    )
+    assert(result == expected)
 
   it should "ignore white spaces" in:
     val result = scanTokens("\tnumber *\n123").toOption.get.map(disassembleToken)
     val expected = List(
       Identifier -> "number",
       Star -> "*",
-      Num -> "123",
+      NumberLiteral -> "123",
     )
     assert(result == expected)
 
@@ -89,7 +95,7 @@ class LexerSpec extends AnyFlatSpec:
         )
       ),
       Token(
-        Num,
+        NumberLiteral,
         "123",
         LocationRange(
           start=Location(idx=10, lnum=2, col=1, code, "FILE_NAME"),
@@ -141,6 +147,11 @@ class ParserSpec extends AnyFlatSpec:
   it should "parse number literal" in:
     val (expr, rest) = parseExpression(scanTokens("234").toOption.get)
     assert(expr == Const(234))
+    assert(rest == Nil)
+
+  it should "parse string literal" in:
+    val (expr, rest) = parseExpression(scanTokens("\" ab \\t \\n \\f \\r \\\" \\\\ \"").toOption.get)
+    assert(expr == Const(" ab \t \n \f \r \" \\ "))
     assert(rest == Nil)
 
   it should "parse name" in:
